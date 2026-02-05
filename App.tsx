@@ -5,7 +5,7 @@ import {
   AuditLog, AccessLevel, Workspace, FieldType, RoleGroup
 } from './types';
 import { MOCK_USERS as INITIAL_USERS, INITIAL_DATA, WORKSPACES as INITIAL_WORKSPACES, INITIAL_GROUPS } from './constants';
-import { canViewRow, getColumnAccess } from './components/AccessControl';
+import { canViewRow, getColumnAccess, isWorkspaceAdmin } from './components/AccessControl';
 import { analyzeDataWithGemini } from './services/geminiService';
 import PolicyView from './components/PolicyView';
 import TemplateDesigner from './components/TemplateDesigner';
@@ -42,17 +42,25 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Visibility Logic ---
-  // Filter workspaces that are visible to the current user's group
+  // Filter workspaces that are visible to the current user's group OR if they are an admin
   const visibleWorkspaces = useMemo(() => {
     return workspaces.filter(ws => {
-      // Admin sees everything
+      // 1. Global Admin
       if (currentUser.role === UserRole.ADMIN) return true;
-      // If no activeGroupIds defined, it's public to all internal users
+      // 2. Workspace Admin
+      if (isWorkspaceAdmin(currentUser, ws)) return true;
+      // 3. Normal Visibility (Active Groups)
       if (!ws.activeGroupIds || ws.activeGroupIds.length === 0) return true;
-      // Check if user's group is in the allowed list
       return ws.activeGroupIds.includes(currentUser.groupId);
     });
   }, [workspaces, currentUser]);
+
+  // Check if current user manages *any* workspace (for displaying config menu)
+  const managedWorkspaces = useMemo(() => {
+      return workspaces.filter(ws => isWorkspaceAdmin(currentUser, ws));
+  }, [workspaces, currentUser]);
+
+  const canAccessPolicyView = currentUser.role === UserRole.ADMIN || managedWorkspaces.length > 0;
 
   // Ensure activeWorkspaceId is valid after visibility changes
   useEffect(() => {
@@ -96,7 +104,7 @@ const App: React.FC = () => {
     return data
       .filter(row => row.workspaceId === activeWorkspaceId)
       .filter(row => {
-        const isVisible = canViewRow(currentUser, row, users);
+        const isVisible = canViewRow(currentUser, row, users, activeWorkspace);
         if (!isVisible) return false;
         const searchableText = Object.values(row).join(' ').toLowerCase();
         return searchableText.includes(searchQuery.toLowerCase());
@@ -371,11 +379,12 @@ const App: React.FC = () => {
               )}
               {visibleWorkspaces.map(ws => {
                 const Icon = IconMap[ws.icon] || Layers;
+                const isAdmin = isWorkspaceAdmin(currentUser, ws);
                 return (
                   <div key={ws.id} className="relative group">
                     <button onClick={() => { setActiveWorkspaceId(ws.id); setCurrentView('GRID'); }} className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl text-[11px] font-black transition-all ${activeWorkspaceId === ws.id && currentView === 'GRID' ? 'bg-white/10 text-white shadow-inner ring-1 ring-white/10' : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}`}><Icon className={`w-4 h-4 ${activeWorkspaceId === ws.id ? 'text-indigo-400' : 'text-slate-600 group-hover:text-slate-400'}`} /><span>{ws.name.toUpperCase()}</span></button>
-                    {/* Only show config button to admin or if explicit permission logic added later. For now let's assume all users in sidebar can see settings button but only admins/owners effectively use it. Or just let it be open. */}
-                    {currentUser.role === UserRole.ADMIN && (
+                    {/* Show Settings for Workspace Admins */}
+                    {isAdmin && (
                        <button onClick={(e) => { e.stopPropagation(); setEditingWorkspace(ws); setIsDesignerOpen(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-600 hover:text-white hover:bg-indigo-600 opacity-0 group-hover:opacity-100 transition-all z-10" title="配置模型"><Settings className="w-3 h-3" /></button>
                     )}
                   </div>
@@ -385,7 +394,7 @@ const App: React.FC = () => {
           </section>
           <section>
              <div className="px-4 pb-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">系统管理</div>
-             {currentUser.role === UserRole.ADMIN ? (
+             {canAccessPolicyView ? (
                  <button onClick={() => setCurrentView('POLICIES')} className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl text-[11px] font-black transition-all ${currentView === 'POLICIES' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:bg-white/5'}`}><Shield className="w-4 h-4" /><span>权限矩阵管理</span></button>
              ) : (
                 <div className="px-4 py-2 text-[10px] text-slate-600 italic">仅管理员可访问配置中心</div>
@@ -489,8 +498,9 @@ const App: React.FC = () => {
         ) : currentView === 'POLICIES' ? (
           <div className="flex-1 overflow-auto bg-[#0b0e14]">
             <PolicyView 
+              currentUser={currentUser}
               users={users} 
-              workspaces={workspaces} 
+              workspaces={managedWorkspaces.length > 0 && currentUser.role !== UserRole.ADMIN ? managedWorkspaces : workspaces} 
               groups={groups} 
               onUpdateUserGroup={(uid, gid) => setUsers(prev => prev.map(u => u.id === uid ? { ...u, groupId: gid } : u))} 
               onAddUser={(u) => setUsers([...users, u])} 
@@ -517,6 +527,7 @@ const App: React.FC = () => {
         <TemplateDesigner 
           initialData={editingWorkspace}
           currentUserId={currentUser.id}
+          users={users}
           onSave={(ws, importedData) => { 
             if (editingWorkspace) {
                setWorkspaces(prev => prev.map(w => w.id === ws.id ? ws : w));

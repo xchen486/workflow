@@ -7,11 +7,12 @@ import {
   AlertCircle, ChevronRight, LayoutGrid, 
   Type, Hash, List, Calendar, Layers,
   Calculator, Cpu, ShoppingCart, Plus, Trash2, Settings, UserPlus, X,
-  FileSpreadsheet, Upload, Download, ClipboardList, Filter, Check, Briefcase
+  FileSpreadsheet, Upload, Download, ClipboardList, Filter, Check, Briefcase, Crown, UserCog
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface PolicyViewProps {
+  currentUser: User; // Need to know who is viewing to allow admin editing
   users: User[];
   groups: RoleGroup[];
   workspaces: Workspace[];
@@ -31,13 +32,15 @@ const IconMap: Record<string, any> = {
 };
 
 const PolicyView: React.FC<PolicyViewProps> = ({ 
-  users, groups, workspaces, 
+  currentUser, users, groups, workspaces, 
   onUpdateUserGroup, onAddUser, onUpdateUser, onDeleteUser, onBatchUpdateUsers,
   onUpdatePermission, onUpdateWorkspace, onAddGroup, onDeleteGroup 
 }) => {
   const [selectedWsId, setSelectedWsId] = useState(workspaces[0]?.id);
   const [tab, setTab] = useState<'PERMISSIONS' | 'PERSONNEL'>('PERSONNEL');
   const [isRoleSelectorOpen, setIsRoleSelectorOpen] = useState(false);
+  const [isAdminSelectorOpen, setIsAdminSelectorOpen] = useState(false); // Controls the admin dropdown
+
   const activeWs = workspaces.find(ws => ws.id === selectedWsId) || workspaces[0];
   const userFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -47,11 +50,16 @@ const PolicyView: React.FC<PolicyViewProps> = ({
     return groups.filter(g => activeWs.activeGroupIds?.includes(g.id));
   }, [activeWs, groups]);
 
-  // 过滤当前业务下的用户（基于用户的角色组是否在当前业务启用的角色组中）
+  // 过滤当前业务下的用户
   const workspaceUsers = useMemo(() => {
     const activeGroupIds = activeGroups.map(g => g.id);
     return users.filter(u => activeGroupIds.includes(u.groupId));
   }, [users, activeGroups]);
+
+  // 获取当前工作区的管理员用户对象
+  const workspaceAdmins = useMemo(() => {
+    return users.filter(u => activeWs.adminIds?.includes(u.id));
+  }, [users, activeWs.adminIds]);
 
   const handleToggleGroup = (groupId: string) => {
     const currentIds = activeWs.activeGroupIds || groups.map(g => g.id);
@@ -64,6 +72,17 @@ const PolicyView: React.FC<PolicyViewProps> = ({
     onUpdateWorkspace(activeWs.id, { activeGroupIds: newIds });
   };
 
+  const handleToggleAdmin = (userId: string) => {
+    const currentAdmins = activeWs.adminIds || [];
+    let newAdmins;
+    if (currentAdmins.includes(userId)) {
+      newAdmins = currentAdmins.filter(id => id !== userId);
+    } else {
+      newAdmins = [...currentAdmins, userId];
+    }
+    onUpdateWorkspace(activeWs.id, { adminIds: newAdmins });
+  };
+
   const handleUserImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -73,8 +92,6 @@ const PolicyView: React.FC<PolicyViewProps> = ({
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data: any[] = XLSX.utils.sheet_to_json(ws);
-        
-        // 默认分配到当前业务的第一个有效组
         const defaultGroupId = activeGroups[0]?.id || groups[0].id;
 
         const mappedUsers: User[] = data.map((d, idx) => ({
@@ -106,7 +123,6 @@ const PolicyView: React.FC<PolicyViewProps> = ({
     
     let rows = text.split(/\r?\n/).filter(r => r.trim());
     const clipboard = rows.map(r => r.split('\t'));
-    
     const defaultGroupId = activeGroups[0]?.id || groups[0].id;
 
     if (confirm('检测到粘贴操作。是否将其添加/更新到当前人员列表？')) {
@@ -114,7 +130,7 @@ const PolicyView: React.FC<PolicyViewProps> = ({
          id: cols[0] || `U-${Date.now()}-${idx}`,
          name: cols[1] || 'New User',
          role: (cols[2] as UserRole) || UserRole.MEMBER,
-         groupId: cols[3] || defaultGroupId, // 优先使用当前业务的默认组
+         groupId: cols[3] || defaultGroupId, 
          managerId: cols[4] || undefined
        }));
        
@@ -138,7 +154,7 @@ const PolicyView: React.FC<PolicyViewProps> = ({
   return (
     <div className="p-10 space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
       {/* Header Area */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-8 border-b border-white/5 pb-10">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-8 border-b border-white/5 pb-10">
         <div className="flex items-center gap-6">
           <div className="bg-indigo-600 p-5 rounded-[2rem] text-white shadow-2xl shadow-indigo-500/30">
             <Shield className="w-10 h-10" />
@@ -148,23 +164,88 @@ const PolicyView: React.FC<PolicyViewProps> = ({
             <p className="text-sm font-bold text-slate-500 uppercase tracking-[0.2em] mt-1">ORGANIZATION & ACCESS CONTROL</p>
           </div>
         </div>
+
+        {/* Workspace Admin Management Widget */}
+        <div className="flex items-center gap-6 bg-slate-900 border border-white/10 p-2 pr-6 rounded-[2rem]">
+            <div className="bg-white/5 p-3 rounded-2xl">
+                <Crown className="w-5 h-5 text-amber-400" />
+            </div>
+            <div className="flex flex-col">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">工作区管理员 (Workspace Admins)</span>
+                <div className="flex items-center gap-2 mt-1 relative">
+                    {workspaceAdmins.length === 0 ? (
+                        <span className="text-xs font-bold text-slate-600 italic">暂无指定管理员 (仅系统Admin可管)</span>
+                    ) : (
+                        <div className="flex -space-x-2">
+                            {workspaceAdmins.map(admin => (
+                                <div key={admin.id} className="w-6 h-6 rounded-full bg-slate-700 border-2 border-slate-900 flex items-center justify-center text-[9px] font-bold text-white relative group cursor-help" title={`${admin.name} (${admin.id})`}>
+                                    {admin.name[0]}
+                                </div>
+                            ))}
+                            <span className="ml-4 text-xs font-bold text-white">{workspaceAdmins.map(a => a.name).join(', ')}</span>
+                        </div>
+                    )}
+                    
+                    {/* Only System Admin can modify workspace admins */}
+                    {currentUser.role === UserRole.ADMIN && (
+                        <div className="relative ml-2">
+                             <button onClick={() => setIsAdminSelectorOpen(!isAdminSelectorOpen)} className="p-1 hover:bg-white/10 rounded-full text-indigo-400 transition-colors" title="管理工作区管理员">
+                                <Settings className="w-4 h-4" />
+                             </button>
+                             {isAdminSelectorOpen && (
+                                <>
+                                  <div className="fixed inset-0 z-40" onClick={() => setIsAdminSelectorOpen(false)}></div>
+                                  <div className="absolute right-0 top-full mt-2 w-72 bg-slate-800 border border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden p-2 animate-in fade-in zoom-in-95 duration-200">
+                                      <div className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase border-b border-white/5 mb-1">
+                                          勾选用户作为此业务管理员
+                                      </div>
+                                      <div className="max-h-60 overflow-y-auto">
+                                          {users.map(u => {
+                                              const isAdm = activeWs.adminIds?.includes(u.id);
+                                              return (
+                                                  <button key={u.id} onClick={() => handleToggleAdmin(u.id)} className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all ${isAdm ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:bg-white/5'}`}>
+                                                      <div className="flex items-center gap-3">
+                                                          <div className="w-6 h-6 rounded-full bg-slate-600 flex items-center justify-center text-[9px] font-bold text-white">{u.name[0]}</div>
+                                                          <div>
+                                                              <div className="text-xs font-bold">{u.name}</div>
+                                                              <div className="text-[9px] opacity-60">{u.role}</div>
+                                                          </div>
+                                                      </div>
+                                                      {isAdm && <Check className="w-3.5 h-3.5" />}
+                                                  </button>
+                                              );
+                                          })}
+                                      </div>
+                                  </div>
+                                </>
+                             )}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
       </div>
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-10">
         
-        {/* Left Sidebar: Workspace Selector (Always Visible) */}
+        {/* Left Sidebar: Workspace Selector */}
         <div className="xl:col-span-1 space-y-6">
              <div className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">业务模型 (Workspace)</div>
              <div className="space-y-2">
                 {workspaces.map(ws => {
                   const Icon = IconMap[ws.icon] || Layers;
                   const isActive = selectedWsId === ws.id;
+                  const isAdminOfWs = ws.adminIds?.includes(currentUser.id);
+
                   return (
                     <button key={ws.id} onClick={() => setSelectedWsId(ws.id)} className={`w-full flex items-center justify-between p-5 rounded-3xl border transition-all ${isActive ? 'bg-indigo-600/10 border-indigo-500/50 text-white shadow-lg' : 'bg-white/5 border-white/5 text-slate-500 hover:border-white/20'}`}>
                       <div className="flex items-center gap-4">
                         <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-400' : 'text-slate-600'}`} />
-                        <span className="text-sm font-black">{ws.name}</span>
+                        <div className="text-left">
+                            <span className="text-sm font-black block">{ws.name}</span>
+                            {isAdminOfWs && <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider flex items-center gap-1"><Crown className="w-3 h-3"/> Admin</span>}
+                        </div>
                       </div>
                       <ChevronRight className={`w-4 h-4 transition-all ${isActive ? 'text-indigo-400 opacity-100' : 'opacity-40'}`}/>
                     </button>
@@ -172,7 +253,7 @@ const PolicyView: React.FC<PolicyViewProps> = ({
                 })}
              </div>
              
-             {/* Global Stats or Extra Info */}
+             {/* Global Stats */}
              <div className="mt-8 p-6 bg-white/5 rounded-3xl border border-white/5 space-y-4">
                 <div className="flex items-center gap-3 text-slate-400">
                     <Users className="w-4 h-4"/>
@@ -234,6 +315,15 @@ const PolicyView: React.FC<PolicyViewProps> = ({
                         )}
                       </div>
                    </div>
+                   
+                   {/* Admin Note */}
+                   <div className="px-10 py-4 bg-amber-500/5 border-b border-amber-500/10 flex items-center gap-3">
+                        <Crown className="w-4 h-4 text-amber-500" />
+                        <p className="text-[10px] font-bold text-amber-500/80 uppercase tracking-wide">
+                            提示: 工作区管理员 ({workspaceAdmins.map(a => a.name).join(', ') || 'None'}) 默认拥有所有字段的 WRITE 权限，无需在此矩阵配置。
+                        </p>
+                   </div>
+
                    <div className="overflow-x-auto">
                       <table className="w-full text-left">
                         <thead className="bg-black/20">
@@ -292,7 +382,6 @@ const PolicyView: React.FC<PolicyViewProps> = ({
                          <button 
                             onClick={() => {
                                const newId = `U-${Date.now()}`;
-                               // 创建新用户时，默认分配到当前业务的第一个组
                                onAddUser({ 
                                    id: newId, 
                                    name: 'New Member', 
@@ -342,13 +431,11 @@ const PolicyView: React.FC<PolicyViewProps> = ({
                                          </select>
                                       </td>
                                       <td className="px-6 py-4">
-                                         {/* 这里只显示当前业务允许的角色组，防止配错 */}
                                          <select value={u.groupId} onChange={e => onUpdateUserGroup(u.id, e.target.value)} className="bg-slate-800 border-none rounded-lg text-[10px] font-bold text-slate-300 px-3 py-1.5 outline-none w-full">
                                             {activeGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                                          </select>
                                       </td>
                                       <td className="px-6 py-4">
-                                         {/* 汇报对象通常可以是任何人，即使不在当前组 */}
                                          <select value={u.managerId || ''} onChange={e => onUpdateUser(u.id, {managerId: e.target.value || undefined})} className="bg-slate-800 border-none rounded-lg text-[10px] font-bold text-slate-300 px-3 py-1.5 outline-none w-full">
                                             <option value="">- Top Level -</option>
                                             {users.filter(other => other.id !== u.id).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}

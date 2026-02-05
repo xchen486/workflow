@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Workspace, FieldType, ColumnPermission, TableRow, DataStatus, AccessLevel, RoleGroup } from '../types';
+import { Workspace, FieldType, ColumnPermission, TableRow, DataStatus, AccessLevel, RoleGroup, User } from '../types';
 import { INITIAL_GROUPS } from '../constants';
-import { Plus, Trash2, Layout, Type, Hash, List, Settings2, Save, X, Calendar, UploadCloud, FileSpreadsheet, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash2, Layout, Type, Hash, List, Settings2, Save, X, Calendar, UploadCloud, FileSpreadsheet, Sparkles, CheckCircle2, UserCog, Check } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface TemplateDesignerProps {
@@ -10,15 +10,18 @@ interface TemplateDesignerProps {
   onSave: (ws: Workspace, importedData?: TableRow[]) => void;
   onCancel: () => void;
   currentUserId: string;
+  users: User[]; // 需要传入所有用户列表以供选择
 }
 
-const TemplateDesigner: React.FC<TemplateDesignerProps> = ({ initialData, onSave, onCancel, currentUserId }) => {
+const TemplateDesigner: React.FC<TemplateDesignerProps> = ({ initialData, onSave, onCancel, currentUserId, users }) => {
   const [name, setName] = useState('');
   const [activeGroupIds, setActiveGroupIds] = useState<string[]>(INITIAL_GROUPS.map(g => g.id));
+  const [adminIds, setAdminIds] = useState<string[]>([]); // 工作区管理员
   const [columns, setColumns] = useState<ColumnPermission[]>([
     { field: 'title', label: '主要事由', type: FieldType.TEXT, groupPermissions: { 'G-GENERAL': AccessLevel.WRITE } },
   ]);
   const [tempImportedRows, setTempImportedRows] = useState<any[]>([]);
+  const [isUserSelectorOpen, setIsUserSelectorOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -26,8 +29,12 @@ const TemplateDesigner: React.FC<TemplateDesignerProps> = ({ initialData, onSave
       setName(initialData.name);
       setColumns(initialData.columns);
       setActiveGroupIds(initialData.activeGroupIds || INITIAL_GROUPS.map(g => g.id));
+      setAdminIds(initialData.adminIds || []);
+    } else {
+        // 新建时，默认当前创建者为管理员（如果不是全局admin）
+        setAdminIds([currentUserId]);
     }
-  }, [initialData]);
+  }, [initialData, currentUserId]);
 
   const slugify = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/^_+|_+$/g, '') || 'field_' + Math.random().toString(36).substr(2, 4);
 
@@ -35,6 +42,12 @@ const TemplateDesigner: React.FC<TemplateDesignerProps> = ({ initialData, onSave
     setActiveGroupIds(prev => 
       prev.includes(groupId) ? prev.filter(id => id !== groupId) : [...prev, groupId]
     );
+  };
+
+  const toggleAdmin = (userId: string) => {
+      setAdminIds(prev => 
+        prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+      );
   };
 
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -102,7 +115,8 @@ const TemplateDesigner: React.FC<TemplateDesignerProps> = ({ initialData, onSave
       name,
       icon: initialData?.icon || 'Layout',
       columns: columns,
-      activeGroupIds: activeGroupIds
+      activeGroupIds: activeGroupIds,
+      adminIds: adminIds
     };
 
     let finalRows: TableRow[] | undefined = undefined;
@@ -150,12 +164,66 @@ const TemplateDesigner: React.FC<TemplateDesignerProps> = ({ initialData, onSave
             <div className="lg:col-span-2 space-y-10">
               <section className="space-y-4">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-4">基本信息</label>
-                <input 
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  placeholder="业务空间名称"
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
+                <div className="grid grid-cols-2 gap-6">
+                    <input 
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    placeholder="业务空间名称"
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                    
+                    {/* Admin Selector */}
+                    <div className="relative">
+                        <button 
+                            onClick={() => setIsUserSelectorOpen(!isUserSelectorOpen)}
+                            className="w-full h-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-left flex items-center justify-between hover:bg-white/10 transition-all"
+                        >
+                            <span className="text-sm font-bold text-slate-300">
+                                {adminIds.length === 0 ? '指定工作区管理员' : `管理员: ${adminIds.length} 人`}
+                            </span>
+                            <UserCog className="w-5 h-5 text-indigo-400" />
+                        </button>
+                        {isUserSelectorOpen && (
+                            <>
+                             <div className="fixed inset-0 z-10" onClick={() => setIsUserSelectorOpen(false)}/>
+                             <div className="absolute top-full left-0 right-0 mt-2 bg-slate-800 border border-white/10 rounded-2xl p-2 z-20 max-h-60 overflow-y-auto shadow-2xl">
+                                <div className="px-3 py-2 text-[10px] text-slate-500 font-bold uppercase">选择能够管理此业务的用户</div>
+                                {users.map(u => (
+                                    <button 
+                                        key={u.id}
+                                        onClick={() => toggleAdmin(u.id)}
+                                        className="w-full flex items-center justify-between p-3 hover:bg-white/5 rounded-xl transition-all"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-6 h-6 rounded-full bg-slate-600 flex items-center justify-center text-[10px] font-bold text-white">
+                                                {u.name[0]}
+                                            </div>
+                                            <div className="text-left">
+                                                <div className={`text-xs font-bold ${adminIds.includes(u.id) ? 'text-indigo-400' : 'text-slate-300'}`}>{u.name}</div>
+                                                <div className="text-[9px] text-slate-500">{u.role} · {u.groupId}</div>
+                                            </div>
+                                        </div>
+                                        {adminIds.includes(u.id) && <Check className="w-4 h-4 text-indigo-400" />}
+                                    </button>
+                                ))}
+                             </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+                {adminIds.length > 0 && (
+                    <div className="flex flex-wrap gap-2 px-2">
+                        {adminIds.map(aid => {
+                            const u = users.find(user => user.id === aid);
+                            return u ? (
+                                <div key={aid} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/20 text-indigo-300 rounded-lg text-xs font-bold border border-indigo-500/20">
+                                    <UserCog className="w-3 h-3"/> {u.name}
+                                    <button onClick={() => toggleAdmin(aid)} className="hover:text-white"><X className="w-3 h-3"/></button>
+                                </div>
+                            ) : null;
+                        })}
+                    </div>
+                )}
               </section>
 
               <section className="space-y-6">

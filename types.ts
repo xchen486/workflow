@@ -67,6 +67,7 @@ export interface Workspace {
   icon: string;
   columns: ColumnPermission[];
   activeGroupIds?: string[]; // 核心控制：决定该业务对哪些角色组可见（Sidebar Visibility）以及参与审批流
+  adminIds?: string[]; // 新增：工作区管理员ID列表，拥有该工作区的最高权限
 }
 
 export interface AuditLog {
