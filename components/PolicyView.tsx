@@ -85,14 +85,7 @@ const PolicyView: React.FC<PolicyViewProps> = ({
           managerId: d.上级ID || d.managerId || undefined
         }));
         
-        // 这里需要注意：如果是全量覆盖，是否保留其他业务的用户？
-        // 简化处理：目前逻辑是追加/更新，或者是替换整个全局列表。
-        // 为了安全起见，我们这里做“智能合并”：保留不在当前导入列表中的ID，更新存在的ID，添加新的。
-        // 但根据之前的逻辑是 onBatchUpdateUsers 直接替换。我们先维持替换逻辑，但提示用户。
         if (confirm(`即将导入 ${mappedUsers.length} 名用户。注意：这将更新系统用户列表。`)) {
-            // 合并逻辑：保留原有的但不在导入列表中的用户？
-            // 简单起见，假设 Excel 包含完整数据，或者追加模式
-            // 这里我们实现追加/更新模式
             const existingIds = new Set(users.map(u => u.id));
             const newUsersList = [...users];
             mappedUsers.forEach(nu => {
@@ -214,16 +207,16 @@ const PolicyView: React.FC<PolicyViewProps> = ({
                       </div>
                       
                       <div className="relative">
-                        <button onClick={() => setIsRoleSelectorOpen(!isRoleSelectorOpen)} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[10px] font-black uppercase border border-white/10 transition-all">
-                          <Filter className="w-3.5 h-3.5" />
-                          配置参与角色 ({activeGroups.length})
+                        <button onClick={() => setIsRoleSelectorOpen(!isRoleSelectorOpen)} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[10px] font-black uppercase border border-white/10 transition-all shadow-lg hover:shadow-indigo-500/10">
+                          <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                          可见性与准入控制 ({activeGroups.length})
                         </button>
                         
                         {isRoleSelectorOpen && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setIsRoleSelectorOpen(false)}></div>
                             <div className="absolute right-0 top-full mt-2 w-64 bg-slate-800 border border-white/10 rounded-2xl shadow-2xl z-20 overflow-hidden p-2 animate-in fade-in zoom-in-95 duration-200">
-                              <div className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">勾选参与此业务的角色</div>
+                              <div className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase">勾选以允许该角色组访问此业务</div>
                               {groups.map(g => {
                                 const isSelected = activeWs.activeGroupIds ? activeWs.activeGroupIds.includes(g.id) : true;
                                 return (
@@ -232,7 +225,7 @@ const PolicyView: React.FC<PolicyViewProps> = ({
                                       <div className={`w-2 h-2 rounded-full ${g.color}`} />
                                       <span className="text-xs font-bold">{g.name}</span>
                                     </div>
-                                    {isSelected && <Check className="w-3.5 h-3.5" />}
+                                    {isSelected ? <Eye className="w-3.5 h-3.5" /> : <span className="text-[10px] opacity-50">Hidden</span>}
                                   </button>
                                 );
                               })}
@@ -247,10 +240,13 @@ const PolicyView: React.FC<PolicyViewProps> = ({
                           <tr>
                             <th className="px-10 py-6 text-[10px] font-black text-slate-500 uppercase border-r border-white/5 w-64">数据字段 (Field)</th>
                             {activeGroups.map(g => (
-                              <th key={g.id} className="px-6 py-6 text-center border-r border-white/5">
+                              <th key={g.id} className="px-6 py-6 text-center border-r border-white/5 relative">
                                  <div className="flex flex-col items-center gap-1.5">
-                                    <div className={`w-2 h-2 rounded-full ${g.color}`} />
-                                    <span className="text-[10px] font-black text-white uppercase">{g.name}</span>
+                                    <div className="flex items-center gap-1.5">
+                                        <div className={`w-2 h-2 rounded-full ${g.color}`} />
+                                        <span className="text-[10px] font-black text-white uppercase">{g.name}</span>
+                                    </div>
+                                    <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 text-[8px] font-black uppercase rounded-md border border-emerald-500/20">Visible</span>
                                  </div>
                               </th>
                             ))}

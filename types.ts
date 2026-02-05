@@ -66,7 +66,7 @@ export interface Workspace {
   name: string;
   icon: string;
   columns: ColumnPermission[];
-  activeGroupIds?: string[]; // 新增：该业务模型启用的角色组
+  activeGroupIds?: string[]; // 核心控制：决定该业务对哪些角色组可见（Sidebar Visibility）以及参与审批流
 }
 
 export interface AuditLog {

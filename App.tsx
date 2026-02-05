@@ -13,7 +13,7 @@ import {
   Shield, Search, Plus, 
   Sparkles, Layers, Wrench, Calendar, Lock, Edit2, XCircle,
   Calculator, Users, Cpu, ShoppingCart, Settings,
-  Download, Upload, FileSpreadsheet
+  Download, Upload, FileSpreadsheet, EyeOff
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -40,6 +40,28 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Visibility Logic ---
+  // Filter workspaces that are visible to the current user's group
+  const visibleWorkspaces = useMemo(() => {
+    return workspaces.filter(ws => {
+      // Admin sees everything
+      if (currentUser.role === UserRole.ADMIN) return true;
+      // If no activeGroupIds defined, it's public to all internal users
+      if (!ws.activeGroupIds || ws.activeGroupIds.length === 0) return true;
+      // Check if user's group is in the allowed list
+      return ws.activeGroupIds.includes(currentUser.groupId);
+    });
+  }, [workspaces, currentUser]);
+
+  // Ensure activeWorkspaceId is valid after visibility changes
+  useEffect(() => {
+    if (currentView === 'GRID' && !visibleWorkspaces.find(ws => ws.id === activeWorkspaceId)) {
+      if (visibleWorkspaces.length > 0) {
+        setActiveWorkspaceId(visibleWorkspaces[0].id);
+      }
+    }
+  }, [visibleWorkspaces, activeWorkspaceId, currentView]);
 
   const activeWorkspace = useMemo(() => 
     workspaces.find(ws => ws.id === activeWorkspaceId) || workspaces[0]
@@ -70,6 +92,7 @@ const App: React.FC = () => {
   }, [toast]);
 
   const filteredData = useMemo(() => {
+    if (!activeWorkspace) return [];
     return data
       .filter(row => row.workspaceId === activeWorkspaceId)
       .filter(row => {
@@ -78,9 +101,10 @@ const App: React.FC = () => {
         const searchableText = Object.values(row).join(' ').toLowerCase();
         return searchableText.includes(searchQuery.toLowerCase());
       });
-  }, [data, activeWorkspaceId, currentUser, searchQuery, users]);
+  }, [data, activeWorkspaceId, currentUser, searchQuery, users, activeWorkspace]);
 
   const gridColumns = useMemo(() => {
+    if (!activeWorkspace) return [];
     return [
       { field: 'status', label: '状态', type: 'status', isSensitive: false },
       ...activeWorkspace.columns
@@ -336,13 +360,24 @@ const App: React.FC = () => {
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">业务工作区</span>
               <button onClick={() => { setEditingWorkspace(null); setIsDesignerOpen(true); }} className="p-1 hover:bg-white/5 rounded text-indigo-400" title="新建业务"><Plus className="w-3 h-3"/></button>
             </div>
+            
             <div className="space-y-1.5">
-              {workspaces.map(ws => {
+              {visibleWorkspaces.length === 0 && (
+                <div className="px-4 py-8 text-center border-2 border-dashed border-white/5 rounded-2xl">
+                    <EyeOff className="w-6 h-6 text-slate-600 mx-auto mb-2"/>
+                    <p className="text-[10px] text-slate-500 font-bold">无可见业务</p>
+                    <p className="text-[8px] text-slate-600 mt-1">当前角色没有被分配到任何工作区可见权限</p>
+                </div>
+              )}
+              {visibleWorkspaces.map(ws => {
                 const Icon = IconMap[ws.icon] || Layers;
                 return (
                   <div key={ws.id} className="relative group">
                     <button onClick={() => { setActiveWorkspaceId(ws.id); setCurrentView('GRID'); }} className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl text-[11px] font-black transition-all ${activeWorkspaceId === ws.id && currentView === 'GRID' ? 'bg-white/10 text-white shadow-inner ring-1 ring-white/10' : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'}`}><Icon className={`w-4 h-4 ${activeWorkspaceId === ws.id ? 'text-indigo-400' : 'text-slate-600 group-hover:text-slate-400'}`} /><span>{ws.name.toUpperCase()}</span></button>
-                    <button onClick={(e) => { e.stopPropagation(); setEditingWorkspace(ws); setIsDesignerOpen(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-600 hover:text-white hover:bg-indigo-600 opacity-0 group-hover:opacity-100 transition-all z-10" title="配置模型"><Settings className="w-3 h-3" /></button>
+                    {/* Only show config button to admin or if explicit permission logic added later. For now let's assume all users in sidebar can see settings button but only admins/owners effectively use it. Or just let it be open. */}
+                    {currentUser.role === UserRole.ADMIN && (
+                       <button onClick={(e) => { e.stopPropagation(); setEditingWorkspace(ws); setIsDesignerOpen(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-600 hover:text-white hover:bg-indigo-600 opacity-0 group-hover:opacity-100 transition-all z-10" title="配置模型"><Settings className="w-3 h-3" /></button>
+                    )}
                   </div>
                 );
               })}
@@ -350,7 +385,11 @@ const App: React.FC = () => {
           </section>
           <section>
              <div className="px-4 pb-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">系统管理</div>
-             <button onClick={() => setCurrentView('POLICIES')} className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl text-[11px] font-black transition-all ${currentView === 'POLICIES' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:bg-white/5'}`}><Shield className="w-4 h-4" /><span>权限矩阵管理</span></button>
+             {currentUser.role === UserRole.ADMIN ? (
+                 <button onClick={() => setCurrentView('POLICIES')} className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl text-[11px] font-black transition-all ${currentView === 'POLICIES' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:bg-white/5'}`}><Shield className="w-4 h-4" /><span>权限矩阵管理</span></button>
+             ) : (
+                <div className="px-4 py-2 text-[10px] text-slate-600 italic">仅管理员可访问配置中心</div>
+             )}
           </section>
           <section>
             <div className="px-4 pb-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">身份模拟</div>
@@ -367,7 +406,7 @@ const App: React.FC = () => {
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0 bg-[#0f1219] overflow-hidden">
-        {currentView === 'GRID' ? (
+        {currentView === 'GRID' && activeWorkspace ? (
           <>
             <header className="bg-slate-900 border-b border-white/5 px-8 py-6 flex flex-col md:flex-row justify-between items-center sticky top-0 z-40 gap-4 md:gap-0">
               <div><h2 className="text-2xl font-black text-white tracking-tight">{activeWorkspace.name}</h2><p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Multi-Cell Batch Ops Ready</p></div>
@@ -447,7 +486,7 @@ const App: React.FC = () => {
                </div>
             </footer>
           </>
-        ) : (
+        ) : currentView === 'POLICIES' ? (
           <div className="flex-1 overflow-auto bg-[#0b0e14]">
             <PolicyView 
               users={users} 
@@ -464,6 +503,13 @@ const App: React.FC = () => {
               onUpdateWorkspace={(wsId, updates) => setWorkspaces(prev => prev.map(ws => ws.id === wsId ? { ...ws, ...updates } : ws))} // 新增：传递更新句柄
             />
           </div>
+        ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-600">
+                <div className="p-10 border border-dashed border-white/5 rounded-3xl text-center">
+                    <Shield className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <p className="font-black text-sm uppercase">Please select a workspace</p>
+                </div>
+            </div>
         )}
       </main>
 
